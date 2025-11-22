@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <algorithm>
+#include <fstream>
 
 /**
  * Converts an RGBA image buffer to grayscale
@@ -80,7 +81,7 @@ int main(void)
     std::cout << "Grayscale conversion completed!" << std::endl;
 
     // Save the grayscale image
-    std::string output_filepath = "res/textures/Lenna_grayscale.png";
+    std::string output_filepath = "res/images/Grayscale.png";
     int result = stbi_write_png(output_filepath.c_str(), width, height, 1, grayscale_image, width * 1);
     
     if (result == 0)
@@ -92,6 +93,36 @@ int main(void)
     }
 
     std::cout << "Grayscale image saved as " << output_filepath << std::endl;
+
+    // Write pixel values (0-15) to text file
+    std::string txt_filepath = "res/textFiles/Grayscale.txt";
+    std::ofstream txt_file(txt_filepath);
+    
+    if (!txt_file.is_open())
+    {
+        std::cerr << "Error: Could not create text file " << txt_filepath << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        return 1;
+    }
+
+    // Write pixel values quantized to 0-15 range, separated by commas (no spaces)
+    for (int i = 0; i < width * height; i++)
+    {
+        // Quantize from 0-255 to 0-15 (divide by 16)
+        unsigned char quantized = grayscale_image[i] / 16;
+        
+        txt_file << (int)quantized;
+        
+        // Add comma after each number except the last one
+        if (i < width * height - 1)
+        {
+            txt_file << ",";
+        }
+    }
+    
+    txt_file.close();
+    std::cout << "Pixel values saved to " << txt_filepath << std::endl;
 
     // Free allocated memory
     stbi_image_free(input_image);

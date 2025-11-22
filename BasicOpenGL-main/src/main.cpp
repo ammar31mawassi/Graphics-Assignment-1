@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-int main(void)
+int main1(void)
 {
     std::string filepath = "res/textures/plane.png";
     int width, height, comps;
