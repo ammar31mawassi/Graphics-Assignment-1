@@ -598,6 +598,89 @@ unsigned char* Hysteresis(
 }
 
 /**
+ * Converts grayscale image to halftone using 2x2 block patterns
+ * Each input pixel becomes a 2x2 block in the output
+ * 
+ * @param gray - Pointer to the grayscale image buffer (0-255)
+ * @param width - Width of the input image in pixels
+ * @param height - Height of the input image in pixels
+ * @return Pointer to newly allocated halftone buffer (binary: 0 or 255), or NULL on failure
+ */
+unsigned char* Halftone_convert(unsigned char* gray, int width, int height)
+{
+    if (gray == nullptr || width <= 0 || height <= 0)
+    {
+        return nullptr;
+    }
+
+    // Output dimensions are 2x the input dimensions
+    int newWidth = width * 2;
+    int newHeight = height * 2;
+
+    // Allocate output buffer
+    unsigned char* halftone = (unsigned char*)malloc(newWidth * newHeight * sizeof(unsigned char));
+    if (halftone == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Initialize all pixels to black (0)
+    memset(halftone, 0, newWidth * newHeight * sizeof(unsigned char));
+
+    // Process each input pixel
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            // Get input pixel value
+            unsigned char pixel = gray[y * width + x];
+            
+            // Normalize to 0-1 range
+            float i = (float)pixel / 255.0f;
+
+            // Calculate output block position (2x2 block)
+            int outX = x * 2;
+            int outY = y * 2;
+
+            // Determine which pixels in the 2x2 block should be white (255)
+            // Block layout:
+            // (0,0) top-left    (1,0) top-right
+            // (0,1) bottom-left (1,1) bottom-right
+
+            if (i >= 0.8f && i <= 1.0f)
+            {
+                // All 4 white
+                halftone[outY * newWidth + outX] = 255;           // top-left
+                halftone[outY * newWidth + (outX + 1)] = 255;    // top-right
+                halftone[(outY + 1) * newWidth + outX] = 255;    // bottom-left
+                halftone[(outY + 1) * newWidth + (outX + 1)] = 255; // bottom-right
+            }
+            else if (i >= 0.6f && i < 0.8f)
+            {
+                // bottom-left, top-right, bottom-right
+                halftone[(outY + 1) * newWidth + outX] = 255;     // bottom-left
+                halftone[outY * newWidth + (outX + 1)] = 255;    // top-right
+                halftone[(outY + 1) * newWidth + (outX + 1)] = 255; // bottom-right
+            }
+            else if (i >= 0.4f && i < 0.6f)
+            {
+                // bottom-left, top-right
+                halftone[(outY + 1) * newWidth + outX] = 255;    // bottom-left
+                halftone[outY * newWidth + (outX + 1)] = 255;    // top-right
+            }
+            else if (i >= 0.2f && i < 0.4f)
+            {
+                // bottom-left only
+                halftone[(outY + 1) * newWidth + outX] = 255;    // bottom-left
+            }
+            // else: 0 <= i < 0.2, all black (already initialized to 0)
+        }
+    }
+
+    return halftone;
+}
+
+/**
  * Complete Canny edge detection pipeline wrapper
  * 
  * @param gray - Pointer to the grayscale image buffer
@@ -760,6 +843,38 @@ int main(void)
     txt_file.close();
     std::cout << "Pixel values saved to " << txt_filepath << std::endl;
 
+    // Apply Halftone conversion
+    std::cout << "Starting Halftone conversion..." << std::endl;
+    unsigned char* halftone_image = Halftone_convert(grayscale_image, width, height);
+    
+    if (halftone_image == nullptr)
+    {
+        std::cerr << "Error: Halftone conversion failed!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        return 1;
+    }
+
+    std::cout << "Halftone conversion completed!" << std::endl;
+
+    // Save Halftone image
+    int halftone_width = width * 2;
+    int halftone_height = height * 2;
+    std::string halftone_filepath = "res/images/Halftone.png";
+    int halftone_result = stbi_write_png(halftone_filepath.c_str(), halftone_width, halftone_height, 1, halftone_image, halftone_width);
+    
+    if (halftone_result == 0)
+    {
+        std::cerr << "Error: Could not save Halftone image!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        free(halftone_image);
+        return 1;
+    }
+
+    std::cout << "Halftone image saved as " << halftone_filepath << std::endl;
+    std::cout << "Halftone dimensions: " << halftone_width << "x" << halftone_height << std::endl;
+
     // Apply Canny edge detection
     std::cout << "Starting Canny edge detection..." << std::endl;
     unsigned char* canny_edges = Canny_convert(grayscale_image, width, height);
@@ -824,6 +939,7 @@ int main(void)
     // Free allocated memory
     stbi_image_free(input_image);
     free(grayscale_image);
+    free(halftone_image);
     free(canny_edges);
 
     return 0;
