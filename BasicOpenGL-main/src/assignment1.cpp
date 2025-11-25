@@ -56,6 +56,63 @@ unsigned char* Grayscale_convert(unsigned char* input, int width, int height, in
 }
 
 /**
+ * Saves image buffer to a text file as comma-separated values (no spaces)
+ * 
+ * @param filename - Name of the output text file
+ * @param buffer - Pointer to the image buffer (unsigned char values 0-255)
+ * @param width - Width of the image in pixels
+ * @param height - Height of the image in pixels
+ * @param isBinary - If true, converts to 0-1 (for black/white images). If false, quantizes to 0-15 (for grayscale images)
+ */
+void SaveDebugTxt(
+    const char* filename,
+    unsigned char* buffer,
+    int width,
+    int height,
+    bool isBinary = false
+)
+{
+    if (buffer == nullptr || width <= 0 || height <= 0)
+    {
+        return;
+    }
+
+    std::ofstream file(filename);
+    if (!file.is_open())
+    {
+        std::cerr << "Error: Could not create debug text file " << filename << std::endl;
+        return;
+    }
+
+    // Write all pixel values as comma-separated integers (no spaces)
+    for (int i = 0; i < width * height; i++)
+    {
+        int value;
+        
+        if (isBinary)
+        {
+            // For black/white images: 255 -> 1, 0 -> 0
+            value = (buffer[i] == 255) ? 1 : 0;
+        }
+        else
+        {
+            // For grayscale images: quantize to 0-15 (divide by 16)
+            value = (int)buffer[i] / 16;
+        }
+        
+        file << value;
+        
+        // Add comma after each number except the last one
+        if (i < width * height - 1)
+        {
+            file << ",";
+        }
+    }
+
+    file.close();
+}
+
+/**
  * Applies Gaussian blur to a grayscale image using a 3x3 kernel
  * 
  * @param gray - Pointer to the grayscale image buffer
@@ -1038,6 +1095,9 @@ int main(void)
 
     std::cout << "Grayscale image saved as " << output_filepath << std::endl;
 
+    // Save debug text file for Grayscale (0-15)
+    SaveDebugTxt("res/textFiles/Grayscale.txt", grayscale_image, width, height, false);
+
     // Write pixel values (0-15) to text file
     std::string txt_filepath = "res/textFiles/Grayscale.txt";
     std::ofstream txt_file(txt_filepath);
@@ -1100,6 +1160,9 @@ int main(void)
     std::cout << "Halftone image saved as " << halftone_filepath << std::endl;
     std::cout << "Halftone dimensions: " << halftone_width << "x" << halftone_height << std::endl;
 
+    // Save debug text file for Halftone (0-1, binary)
+    SaveDebugTxt("res/textFiles/Halftone.txt", halftone_image, halftone_width, halftone_height, true);
+
     // Apply Floyd-Steinberg error diffusion dithering
     std::cout << "Starting Floyd-Steinberg dithering..." << std::endl;
     unsigned char* floydsteinberg_image = FloydSteinberg_convert(grayscale_image, width, height);
@@ -1131,6 +1194,9 @@ int main(void)
 
     std::cout << "Floyd-Steinberg image saved as " << floydsteinberg_filepath << std::endl;
 
+    // Save debug text file for Floyd-Steinberg (0-15)
+    SaveDebugTxt("res/textFiles/FloyedSteinberg.txt", floydsteinberg_image, width, height, false);
+
     // Apply Canny edge detection
     std::cout << "Starting Canny edge detection..." << std::endl;
     unsigned char* canny_edges = Canny_convert(grayscale_image, width, height);
@@ -1159,6 +1225,9 @@ int main(void)
     }
 
     std::cout << "Canny edge image saved as " << canny_filepath << std::endl;
+
+    // Save debug text file for Canny (0-1, binary)
+    SaveDebugTxt("res/textFiles/Canny.txt", canny_edges, width, height, true);
 
     // Write Canny pixel values (0-1) to text file
     std::string canny_txt_filepath = "res/textFiles/Canny.txt";
