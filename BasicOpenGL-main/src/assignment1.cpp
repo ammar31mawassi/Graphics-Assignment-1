@@ -681,6 +681,231 @@ unsigned char* Halftone_convert(unsigned char* gray, int width, int height)
 }
 
 /**
+ * Applies Floyd-Steinberg error diffusion dithering to reduce grayscale to 16 levels
+ * 
+ * @param gray - Pointer to the grayscale image buffer (0-255)
+ * @param width - Width of the image in pixels
+ * @param height - Height of the image in pixels
+ * @return Pointer to newly allocated dithered buffer (16 levels: 0, 16, 32, ..., 240, 255), or NULL on failure
+ */
+unsigned char* FloydSteinberg_convert(unsigned char* gray, int width, int height)
+{
+    if (gray == nullptr || width <= 0 || height <= 0)
+    {
+        return nullptr;
+    }
+
+    // Allocate output buffer and copy input
+    unsigned char* output = (unsigned char*)malloc(width * height * sizeof(unsigned char));
+    if (output == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Copy input to output (we'll modify output in place)
+    memcpy(output, gray, width * height * sizeof(unsigned char));
+
+    // Process pixels in scanline order (top to bottom, left to right)
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            int idx = y * width + x;
+            int oldValue = (int)output[idx];
+
+            // Quantize to nearest of 16 levels
+            int newValue = (int)(std::round(oldValue / 16.0f) * 16.0f);
+            
+            // Clamp to 0-255
+            newValue = std::max(0, std::min(255, newValue));
+
+            // Set quantized value
+            output[idx] = (unsigned char)newValue;
+
+            // Compute error
+            int error = oldValue - newValue;
+
+            // Distribute error to neighbors using Floyd-Steinberg kernel
+            // Kernel weights: (x+1, y): 7/16, (x-1, y+1): 3/16, (x, y+1): 5/16, (x+1, y+1): 1/16
+            
+            // Check which neighbors are valid and collect their positions in Floyd-Steinberg order
+            struct Neighbor {
+                int x, y;
+                float weight;
+            };
+            
+            Neighbor neighbors[4];
+            int validCount = 0;
+            float weights[4] = {7.0f/16.0f, 3.0f/16.0f, 5.0f/16.0f, 1.0f/16.0f};
+
+            // (x+1, y) - weight 7/16
+            if (x + 1 < width)
+            {
+                neighbors[validCount] = {x + 1, y, weights[0]};
+                validCount++;
+            }
+
+            // (x-1, y+1) - weight 3/16
+            if (x - 1 >= 0 && y + 1 < height)
+            {
+                neighbors[validCount] = {x - 1, y + 1, weights[1]};
+                validCount++;
+            }
+
+            // (x, y+1) - weight 5/16
+            if (y + 1 < height)
+            {
+                neighbors[validCount] = {x, y + 1, weights[2]};
+                validCount++;
+            }
+
+            // (x+1, y+1) - weight 1/16
+            if (x + 1 < width && y + 1 < height)
+            {
+                neighbors[validCount] = {x + 1, y + 1, weights[3]};
+                validCount++;
+            }
+
+            // Distribute error
+            if (validCount > 0)
+            {
+                // Check if all 4 neighbors are present
+                bool allNeighborsPresent = (validCount == 4);
+                
+                if (allNeighborsPresent)
+                {
+                    // Use standard Floyd-Steinberg weights (stored in neighbor struct)
+                    for (int i = 0; i < 4; i++)
+                    {
+                        int errorAmount = (int)(error * neighbors[i].weight);
+                        
+                        int nIdx = neighbors[i].y * width + neighbors[i].x;
+                        int newPixelValue = (int)output[nIdx] + errorAmount;
+                        
+                        // Clamp to 0-255
+                        newPixelValue = std::max(0, std::min(255, newPixelValue));
+                        output[nIdx] = (unsigned char)newPixelValue;
+                    }
+                }
+                else
+                {
+                    // Split error equally among available neighbors
+                    int errorPerNeighbor = error / validCount;
+                    int remainder = error % validCount;
+                    
+                    for (int i = 0; i < validCount; i++)
+                    {
+                        // Distribute remainder to first few neighbors
+                        int errorAmount = errorPerNeighbor + (i < remainder ? 1 : 0);
+                        
+                        int nIdx = neighbors[i].y * width + neighbors[i].x;
+                        int newPixelValue = (int)output[nIdx] + errorAmount;
+                        
+                        // Clamp to 0-255
+                        newPixelValue = std::max(0, std::min(255, newPixelValue));
+                        output[nIdx] = (unsigned char)newPixelValue;
+                    }
+                }
+            }
+        }
+    }
+
+    return output;
+}
+
+/**
+ * Creates a composite image with 4 results in a 2x2 grid:
+ * Top-left: Grayscale, Top-right: Canny, Bottom-left: Halftone, Bottom-right: Floyd-Steinberg
+ * 
+ * @param grayscale - Pointer to grayscale image (width x height)
+ * @param canny - Pointer to Canny edge image (width x height)
+ * @param halftone - Pointer to Halftone image (width*2 x height*2)
+ * @param floydsteinberg - Pointer to Floyd-Steinberg image (width x height)
+ * @param width - Width of grayscale/canny/floydsteinberg images
+ * @param height - Height of grayscale/canny/floydsteinberg images
+ * @return Pointer to newly allocated composite buffer (width*2 x height*2), or NULL on failure
+ */
+unsigned char* CreateComposite(
+    unsigned char* grayscale,
+    unsigned char* canny,
+    unsigned char* halftone,
+    unsigned char* floydsteinberg,
+    int width,
+    int height
+)
+{
+    if (grayscale == nullptr || canny == nullptr || halftone == nullptr || floydsteinberg == nullptr)
+    {
+        return nullptr;
+    }
+
+    int compositeWidth = width * 2;
+    int compositeHeight = height * 2;
+
+    // Allocate composite buffer
+    unsigned char* composite = (unsigned char*)malloc(compositeWidth * compositeHeight * sizeof(unsigned char));
+    if (composite == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Initialize to black
+    memset(composite, 0, compositeWidth * compositeHeight * sizeof(unsigned char));
+
+    // Top-left: Grayscale
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            composite[y * compositeWidth + x] = grayscale[y * width + x];
+        }
+    }
+
+    // Top-right: Canny
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            composite[y * compositeWidth + (width + x)] = canny[y * width + x];
+        }
+    }
+
+    // Bottom-left: Halftone (scale down from 2x size by averaging 2x2 blocks)
+    int halftoneWidth = width * 2;
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            // Average the 2x2 block from halftone to get a single pixel value
+            int halftoneX = x * 2;
+            int halftoneY = y * 2;
+            
+            // Get all 4 pixels in the 2x2 block
+            int sum = 0;
+            sum += halftone[halftoneY * halftoneWidth + halftoneX];           // top-left
+            sum += halftone[halftoneY * halftoneWidth + (halftoneX + 1)];     // top-right
+            sum += halftone[(halftoneY + 1) * halftoneWidth + halftoneX];    // bottom-left
+            sum += halftone[(halftoneY + 1) * halftoneWidth + (halftoneX + 1)]; // bottom-right
+            
+            // Average and set in composite
+            unsigned char avg = (unsigned char)(sum / 4);
+            composite[(height + y) * compositeWidth + x] = avg;
+        }
+    }
+
+    // Bottom-right: Floyd-Steinberg
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            composite[(height + y) * compositeWidth + (width + x)] = floydsteinberg[y * width + x];
+        }
+    }
+
+    return composite;
+}
+
+/**
  * Complete Canny edge detection pipeline wrapper
  * 
  * @param gray - Pointer to the grayscale image buffer
@@ -875,6 +1100,37 @@ int main(void)
     std::cout << "Halftone image saved as " << halftone_filepath << std::endl;
     std::cout << "Halftone dimensions: " << halftone_width << "x" << halftone_height << std::endl;
 
+    // Apply Floyd-Steinberg error diffusion dithering
+    std::cout << "Starting Floyd-Steinberg dithering..." << std::endl;
+    unsigned char* floydsteinberg_image = FloydSteinberg_convert(grayscale_image, width, height);
+    
+    if (floydsteinberg_image == nullptr)
+    {
+        std::cerr << "Error: Floyd-Steinberg dithering failed!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        free(halftone_image);
+        return 1;
+    }
+
+    std::cout << "Floyd-Steinberg dithering completed!" << std::endl;
+
+    // Save Floyd-Steinberg image
+    std::string floydsteinberg_filepath = "res/images/FloyedSteinberg.png";
+    int floydsteinberg_result = stbi_write_png(floydsteinberg_filepath.c_str(), width, height, 1, floydsteinberg_image, width);
+    
+    if (floydsteinberg_result == 0)
+    {
+        std::cerr << "Error: Could not save Floyd-Steinberg image!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        free(halftone_image);
+        free(floydsteinberg_image);
+        return 1;
+    }
+
+    std::cout << "Floyd-Steinberg image saved as " << floydsteinberg_filepath << std::endl;
+
     // Apply Canny edge detection
     std::cout << "Starting Canny edge detection..." << std::endl;
     unsigned char* canny_edges = Canny_convert(grayscale_image, width, height);
@@ -936,11 +1192,56 @@ int main(void)
     canny_txt_file.close();
     std::cout << "Canny pixel values (0-1) saved to " << canny_txt_filepath << std::endl;
 
+    // Create composite image (2x2 grid)
+    std::cout << "Creating composite image..." << std::endl;
+    unsigned char* composite_image = CreateComposite(
+        grayscale_image,
+        canny_edges,
+        halftone_image,
+        floydsteinberg_image,
+        width,
+        height
+    );
+
+    if (composite_image == nullptr)
+    {
+        std::cerr << "Error: Composite image creation failed!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        free(halftone_image);
+        free(floydsteinberg_image);
+        free(canny_edges);
+        return 1;
+    }
+
+    // Save composite image
+    int composite_width = width * 2;
+    int composite_height = height * 2;
+    std::string composite_filepath = "res/images/Composite.png";
+    int composite_result = stbi_write_png(composite_filepath.c_str(), composite_width, composite_height, 1, composite_image, composite_width);
+
+    if (composite_result == 0)
+    {
+        std::cerr << "Error: Could not save composite image!" << std::endl;
+        stbi_image_free(input_image);
+        free(grayscale_image);
+        free(halftone_image);
+        free(floydsteinberg_image);
+        free(canny_edges);
+        free(composite_image);
+        return 1;
+    }
+
+    std::cout << "Composite image saved as " << composite_filepath << std::endl;
+    std::cout << "Composite dimensions: " << composite_width << "x" << composite_height << std::endl;
+
     // Free allocated memory
     stbi_image_free(input_image);
     free(grayscale_image);
     free(halftone_image);
+    free(floydsteinberg_image);
     free(canny_edges);
+    free(composite_image);
 
     return 0;
 }
